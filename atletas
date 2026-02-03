@@ -1,0 +1,881 @@
+DROP DATABASE IF EXISTS atletas;
+
+CREATE DATABASE atletas
+    WITH 
+    ENCODING = 'UTF8';
+
+\c atletas
+
+CREATE TABLE deportes (
+	id_deporte CHAR(6) NOT NULL,
+	nombreDep VARCHAR(20) NOT NULL
+);
+
+CREATE TABLE entrenadores (
+	id_entrenador CHAR(6) NOT NULL,
+	nombreEnt VARCHAR(15) NOT NULL,
+	apellidoEnt VARCHAR(15) NOT NULL
+);
+
+CREATE TABLE divisiones (
+	codigo_division CHAR(6) NOT NULL,
+	nombreDiv VARCHAR(15) NOT NULL
+);
+
+CREATE TABLE equipos (
+    	id_equipo CHAR(6) NOT NULL,
+    	nombreEq VARCHAR(15) NOT NULL,
+    	generoEq CHAR(1),
+    	fecha_creacion DATE NOT NULL,
+    	id_entrenador CHAR(6) NOT NULL,
+    	codigo_division CHAR(6) NOT NULL,
+	id_deporte CHAR(6) NOT NULL
+);
+
+CREATE TABLE atletas (
+	matricula CHAR(6) NOT NULL,
+	generoAt CHAR(1) NOT NULL,
+	nombreAt VARCHAR(15) NOT NULL,
+	apellidoAt VARCHAR(15) NOT NULL,
+	fechnac DATE NOT NULL,
+	calle VARCHAR(30) NOT NULL,
+	numeroExt INT NOT NULL, 
+	municipio VARCHAR(15) NOT NULL,
+	id_equipo CHAR(6) NOT NULL
+);
+
+CREATE TABLE especialidades (
+	id_especialidad CHAR(6) NOT NULL,
+	nombreEs VARCHAR(15) NOT NULL,
+	id_deporte CHAR(6) NOT NULL
+);
+
+CREATE TABLE recintos (
+	id_recinto CHAR(6) NOT NULL,
+	nombreRec VARCHAR(30) NOT NULL,
+	calleRec VARCHAR(30) NOT NULL,
+	numRec INT,
+	municipioRec VARCHAR(15) NOT NULL
+);
+
+CREATE TABLE eventos (
+	id_evento CHAR(6) NOT NULL,
+	fecha_inicio DATE NOT NULL,
+	fecha_fin DATE,
+	nombreEv VARCHAR(30) NOT NULL,
+	codigo_division CHAR(6) NOT NULL,
+	id_recinto CHAR(6) NOT NULL,
+	id_especialidad CHAR(6) NOT NULL
+);
+
+CREATE TABLE compite_en (
+	matricula CHAR(6) NOT NULL,
+	id_evento CHAR(6) NOT NULL,
+	resultado SMALLINT,
+	puntos_obt INT NOT NULL
+);
+
+\d atletas
+
+--Creacion de llaves primarias y/o foráneas para la integridad de nuestro negocio
+
+ALTER TABLE deportes
+ADD CONSTRAINT pk_deportes PRIMARY KEY (id_deporte);
+
+ALTER TABLE entrenadores
+ADD CONSTRAINT pk_entrenadores PRIMARY KEY (id_entrenador);
+
+ALTER TABLE divisiones
+ADD CONSTRAINT pk_divisiones PRIMARY KEY (codigo_division);
+
+ALTER TABLE equipos
+ADD CONSTRAINT pk_equipos PRIMARY KEY (id_equipo),
+ADD CONSTRAINT fk_deportes FOREIGN KEY (id_deporte) REFERENCES deportes(id_deporte),
+ADD CONSTRAINT fk_divisiones FOREIGN KEY (codigo_division) REFERENCES divisiones(codigo_division),
+ADD CONSTRAINT fk_entrenadores FOREIGN KEY (id_entrenador) REFERENCES entrenadores(id_entrenador);
+
+ALTER TABLE atletas
+ADD CONSTRAINT pk_atletas PRIMARY KEY (matricula),
+ADD CONSTRAINT fk_equipos FOREIGN KEY (id_equipo) REFERENCES equipos(id_equipo);
+
+ALTER TABLE especialidades
+ADD CONSTRAINT pk_especialidades PRIMARY KEY (id_especialidad),
+ADD CONSTRAINT fk_deportes2 FOREIGN KEY (id_deporte) REFERENCES deportes(id_deporte);
+
+ALTER TABLE recintos
+ADD CONSTRAINT pk_recintos PRIMARY KEY (id_recinto);
+
+ALTER TABLE eventos
+ADD CONSTRAINT pk_eventos PRIMARY KEY (id_evento),
+ADD CONSTRAINT fk_recintos FOREIGN KEY (id_recinto) REFERENCES recintos(id_recinto),
+ADD CONSTRAINT fk_divisiones2 FOREIGN KEY (codigo_division) REFERENCES divisiones(codigo_division);
+
+ALTER TABLE compite_en
+ADD CONSTRAINT pk_compite_en PRIMARY KEY (matricula, id_evento),
+ADD CONSTRAINT fk_atletas FOREIGN KEY (matricula) REFERENCES atletas(matricula),
+ADD CONSTRAINT fk_eventos FOREIGN KEY (id_evento) REFERENCES eventos(id_evento);
+
+\d compite_en
+
+\d eventos
+
+\d recintos
+
+\d especialidades
+
+\d equipos 
+
+\d atletas 
+
+\d divisiones
+
+\d entrenadores
+
+\d deportes
+
+--Creacion de constraints o defaults para la integridad de nuestro negocio
+
+--Restricciones a nuestra tabla de equipos
+ALTER TABLE equipos
+ADD CONSTRAINT chk_genero_equipo CHECK (generoEq IN ('V', 'F') OR generoEq IS NULL),
+ADD CONSTRAINT chk_fecha_equipo CHECK (fecha_creacion <= CURRENT_DATE),
+ADD CONSTRAINT uk_nombre_division UNIQUE (nombreEq, codigo_division);
+
+--Restricciones a nuestra tabla de atletas
+ALTER TABLE atletas
+ADD CONSTRAINT chk_genero_atleta CHECK (generoAt IN ('M', 'F')); 
+
+--Restricciones a nuestra tabla de especialidades
+ALTER TABLE especialidades
+ADD CONSTRAINT uq_especialidad UNIQUE (nombreEs, id_deporte);
+
+--Restricciones a nuestra tabla de compite
+ALTER TABLE compite_en
+ADD CONSTRAINT chk_puntos_positivos CHECK (puntos_obt >= 0),
+ADD CONSTRAINT chk_resultado CHECK (resultado IN (1, 2, 3) OR resultado IS NULL);
+
+--Restricciones a nuestra tabla de eventos
+ALTER TABLE eventos
+ADD CONSTRAINT chk_fechas_evento CHECK (fecha_fin >= fecha_inicio);
+
+-- Funcion para restricción de registro de atletas en eventos cuyo evento o división sea distinta.
+CREATE OR REPLACE FUNCTION verificar_deporte_evento()
+RETURNS TRIGGER AS $$
+DECLARE
+deporte_equipo CHAR(6);
+   	especialidad_evento CHAR(6);
+   	deporte_evento CHAR(6);
+   	division_equipo CHAR(6);
+   	division_evento CHAR(6);
+BEGIN
+   	SELECT e.id_deporte, e.codigo_division INTO deporte_equipo, division_equipo
+   	FROM equipos e
+   	JOIN atletas a ON e.id_equipo = a.id_equipo
+    	WHERE a.matricula = NEW.matricula;
+
+    	SELECT ev.id_especialidad, ev.codigo_division INTO especialidad_evento, division_evento
+    	FROM eventos ev
+    	WHERE ev.id_evento = NEW.id_evento;
+
+    	SELECT s.id_deporte INTO deporte_evento
+    	FROM especialidades s
+    	WHERE s.id_especialidad = especialidad_evento;
+
+    	IF deporte_equipo <> deporte_evento THEN
+      	RAISE EXCEPTION 'No se puede inscribir un equipo en un evento de un deporte diferente.';
+    	END IF;
+
+    	IF division_equipo <> division_evento THEN
+        	RAISE EXCEPTION 'No se puede inscribir un equipo en un evento de una división diferente.';
+    	END IF;
+
+    	RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER evitar_inscripcion_incorrecta
+BEFORE INSERT ON compite_en
+FOR EACH ROW
+EXECUTE FUNCTION verificar_deporte_evento();
+
+-- Funcion para restricción de registro de atletas en eventos cuyo equipo haya sido creado después del evento
+CREATE OR REPLACE FUNCTION verificar_fecha_creacion_equipo()
+RETURNS TRIGGER AS $$
+DECLARE
+    fecha_creacion_equipo DATE;
+    fecha_inicio_evento DATE;
+BEGIN
+    -- Obtener la fecha de creación del equipo del atleta que se va a inscribir
+    SELECT e.fecha_creacion INTO fecha_creacion_equipo
+    FROM equipos e
+    JOIN atletas a ON e.id_equipo = a.id_equipo
+    WHERE a.matricula = NEW.matricula;
+
+    -- Obtener la fecha de inicio del evento
+    SELECT ev.fecha_inicio INTO fecha_inicio_evento
+    FROM eventos ev
+    WHERE ev.id_evento = NEW.id_evento;
+
+    -- Comparar las fechas
+    IF fecha_creacion_equipo > fecha_inicio_evento THEN
+        RAISE EXCEPTION 'El equipo fue creado después de la fecha de inicio del evento.';
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER evitar_inscripcion_equipo_reciente
+BEFORE INSERT ON compite_en
+FOR EACH ROW
+EXECUTE FUNCTION verificar_fecha_creacion_equipo();
+
+\d compite_en
+
+-- Registros de nuestra base de datos
+
+-- 1. Deportes
+INSERT INTO deportes VALUES
+('DEP001', 'Carrera'),
+('DEP002', 'Salto'),
+('DEP003', 'Lanzamiento'),
+('DEP004', 'Pruebas combinadas'),
+('DEP005', 'Carreras en ruta');
+
+-- 2. Entrenadores
+INSERT INTO entrenadores VALUES
+('ENT001', 'Carlos', 'Mendoza'),
+('ENT002', 'Ana', 'García'),
+('ENT003', 'Miguel', 'Torres'),
+('ENT004', 'Laura', 'Hernández'),
+('ENT005', 'Roberto', 'Silva'),
+('ENT006', 'Sofía', 'Ramírez'),
+('ENT007', 'Jorge', 'López'),
+('ENT008', 'Elena', 'Castro'),
+('ENT009', 'Pedro', 'Ortega'),
+('ENT010', 'Carmen', 'Vargas');
+
+-- 3. Divisiones
+INSERT INTO divisiones VALUES
+('DIV001', 'Primera'),
+('DIV002', 'Segunda'),
+('DIV003', 'Tercera'),
+('DIV004', 'Juvenil A'),
+('DIV005', 'Juvenil B'),
+('DIV006', 'Sub-20'),
+('DIV007', 'Sub-18'),
+('DIV008', 'Élite'),
+('DIV009', 'Principiante'),
+('DIV010', 'Avanzado');
+
+
+-- 4. Equipos
+INSERT INTO equipos VALUES
+('EQU001', 'Leones', 'F', '2017-3-2', 'ENT001', 'DIV010', 'DEP005'),
+('EQU002', 'Tigres', 'F', '2011-7-2', 'ENT002', 'DIV010', 'DEP005'),
+('EQU003', 'Panteras', 'V', '2013-5-14', 'ENT003', 'DIV010', 'DEP005'),
+('EQU004', 'Jaguares', NULL, '2006-5-15', 'ENT004', 'DIV009', 'DEP005'),
+('EQU005', 'Pumas', 'F', '2014-10-14', 'ENT005', 'DIV009', 'DEP005'),
+('EQU006', 'Águilas', 'V', '2015-1-9', 'ENT006', 'DIV009', 'DEP005'),
+('EQU007', 'Halcones', 'F', '2018-12-19', 'ENT007', 'DIV008', 'DEP004'),
+('EQU008', 'Búhos', 'V', '2002-9-27', 'ENT008', 'DIV008', 'DEP004'),
+('EQU009', 'Cóndores', 'F', '2000-8-26', 'ENT009', 'DIV008', 'DEP004'),
+('EQU010', 'Cuervos', 'F', '2003-3-18', 'ENT010', 'DIV007', 'DEP004'),
+('EQU011', 'Toros', NULL, '2012-8-16', 'ENT001', 'DIV007', 'DEP004'),
+('EQU012', 'Búfalos', 'F', '2014-3-18', 'ENT002', 'DIV007', 'DEP004'),
+('EQU013', 'Rinocerontes', NULL, '2005-8-21', 'ENT003', 'DIV006', 'DEP003'),
+('EQU014', 'Elefantes', NULL, '2000-12-9', 'ENT004', 'DIV006', 'DEP003'),
+('EQU015', 'Hipopótamos', 'F', '2020-9-6', 'ENT005', 'DIV006', 'DEP003'),
+('EQU016', 'Caballos', 'F', '2012-4-24', 'ENT006', 'DIV005', 'DEP003'),
+('EQU017', 'Mustangs', 'F', '2018-8-27', 'ENT007', 'DIV005', 'DEP003'),
+('EQU018', 'Lobos', 'F', '2004-5-22', 'ENT008', 'DIV005', 'DEP003'),
+('EQU019', 'Coyotes', 'F', '2017-11-9', 'ENT009', 'DIV004', 'DEP002'),
+('EQU020', 'Perros salvajes', NULL, '2022-11-25', 'ENT010', 'DIV004', 'DEP002'),
+('EQU021', 'Osos', NULL, '2014-3-20', 'ENT001', 'DIV004', 'DEP002'),
+('EQU022', 'Grizzlies', 'F', '2018-4-29', 'ENT002', 'DIV003', 'DEP002'),
+('EQU023', 'Pandas', 'F', '2013-1-16', 'ENT003', 'DIV003', 'DEP002'),
+('EQU024', 'Koalas', 'V', '2017-11-5', 'ENT004', 'DIV003', 'DEP002'),
+('EQU025', 'Mapaches', 'V', '2008-12-8', 'ENT005', 'DIV002', 'DEP001'),
+('EQU026', 'Delfines', 'F', '2017-3-16', 'ENT006', 'DIV002', 'DEP001'),
+('EQU027', 'Tiburones', 'V', '2000-7-15', 'ENT007', 'DIV002', 'DEP001'),
+('EQU028', 'Ballenas', 'V', '2000-8-25', 'ENT008', 'DIV001', 'DEP001'),
+('EQU029', 'Pingüinos', NULL, '2011-6-7', 'ENT009', 'DIV001', 'DEP001'),
+('EQU030', 'Cocodrilos', 'F', '2009-11-09', 'ENT010', 'DIV001', 'DEP001');
+
+-- 5. Atletas
+INSERT INTO atletas VALUES
+('AT001', 'M', 'Alejandro', 'García', '2003-9-4', 'Insurgentes', 87, 'Benito Juárez', 'EQU001'),
+('AT002', 'M', 'José', 'Martínez', '2002-6-11', 'Paseo de la Reforma', 375, 'Cuauhtémoc', 'EQU001'),
+('AT003', 'M', 'Luis', 'López', '2000-7-29', 'Tlalpan', 104, 'Iztapalapa', 'EQU001'),
+('AT004', 'M', 'Carlos', 'Hernández', '2007-4-18', 'Eje Central', 373, 'Cuauhtémoc', 'EQU002'),
+('AT005', 'M', 'Miguel', 'González', '2000-9-24', 'Universidad', 373, 'Coyoacán', 'EQU002'),
+('AT006', 'M', 'Juan', 'Pérez', '2004-4-6', 'División del Norte', 478, 'Benito Juárez', 'EQU002'),
+('AT007', 'M', 'Andrés', 'Rodríguez', '2001-5-13', 'Ignacio Zaragoza', 400, 'Iztapalapa', 'EQU003'),
+('AT008', 'M', 'Francisco', 'Sánchez', '1999-3-8', 'Revolución', 462, 'Álvaro Obregón', 'EQU003'),
+('AT009', 'M', 'Ricardo', 'Ramírez', '2004-4-6', 'Patriotismo', 138, 'Benito Juárez', 'EQU003'),
+('AT010', 'M', 'Sergio', 'Cruz', '2003-6-12', 'Chapultepec', 275, 'Cuauhtémoc', 'EQU004'),
+('AT011', 'M', 'Fernando', 'Flores', '2002-8-22', 'Viaducto', 200, 'Benito Juárez', 'EQU004'),
+('AT012', 'M', 'Manuel', 'Morales', '2001-2-17', 'Circuito Interior', 486, 'Miguel Hidalgo', 'EQU004'),
+('AT013', 'M', 'Javier', 'Ortiz', '1999-11-12', 'Periférico Sur', 85, 'Coyoacán', 'EQU005'),
+('AT014', 'M', 'Antonio', 'Jiménez', '2006-5-12', 'Periférico Norte', 29, 'Azcapotzalco', 'EQU005'),
+('AT015', 'M', 'Diego', 'Ruiz', '2007-7-18', 'La Viga', 454, 'Iztacalco', 'EQU005'),
+('AT016', 'M', 'Eduardo', 'Castillo', '2004-8-17', 'Juárez', 497, 'Cuauhtémoc', 'EQU006'),
+('AT017', 'M', 'Martín', 'Torres', '1999-11-2', 'Hidalgo', 200, 'Cuauhtémoc', 'EQU006'),
+('AT018', 'M', 'Iván', 'Vargas', '2007-2-3', 'México-Tacuba', 287, 'Miguel Hidalgo', 'EQU006'),
+('AT019', 'M', 'Raúl', 'Mendoza', '2001-7-29', 'Insurgentes Sur', 419, 'Benito Juárez', 'EQU007'),
+('AT020', 'M', 'Víctor', 'Silva', '2001-5-4', 'Insurgentes Norte', 392, 'Gustavo Madero', 'EQU007'),
+('AT021', 'M', 'Pedro', 'Castro', '2004-9-25', 'Ermita Iztapalapa', 481, 'Iztapalapa', 'EQU007'),
+('AT022', 'M', 'Alberto', 'Domínguez', '2000-10-17', 'Miguel Ángel de Quevedo', 283, 'Coyoacán', 'EQU008'),
+('AT023', 'M', 'Hugo', 'Guerrero', '1999-6-12', 'Taxqueña', 421, 'Coyoacán', 'EQU008'),
+('AT024', 'M', 'Pablo', 'Ramos', '2003-12-19', 'Coyoacán', 105, 'Benito Juárez', 'EQU008'),
+('AT025', 'M', 'Gabriel', 'Chávez', '2006-9-20', 'Río Mixcoac', 13, 'Benito Juárez', 'EQU009'),
+('AT026', 'M', 'Daniel', 'Medina', '2003-10-13', 'Del Hueso', 403, 'Coyoacán', 'EQU009'),
+('AT027', 'M', 'Rodrigo', 'Aguilar', '2005-12-15', 'Tláhuac', 33, 'Tláhuac', 'EQU009'),
+('AT028', 'M', 'Cristian', 'Romero', '2004-1-1', 'Las Bombas', 175, 'Coyoacán', 'EQU010'),
+('AT029', 'M', 'Óscar', 'Delgado', '2004-4-22', 'San Jerónimo', 417, 'Álvaro Obregón', 'EQU010'),
+('AT030', 'M', 'Enrique', 'Moreno', '2003-6-28', 'Santa Fe', 27, 'Cuajimalpa', 'EQU010'),
+('AT031', 'F', 'María', 'Vázquez', '2000-9-7', 'Constituyentes', 302, 'Miguel Hidalgo', 'EQU011'),
+('AT032', 'F', 'Ana', 'Reyes', '2004-6-12', 'Observatorio', 404, 'Álvaro Obregón', 'EQU011'),
+('AT033', 'F', 'Lucía', 'Cortés', '2004-2-27', 'Vallejo', 48, 'Gustavo Madero', 'EQU011'),
+('AT034', 'F', 'Carmen', 'Rojas', '2004-3-6', 'Eje 5 Sur', 393, 'Iztapalapa', 'EQU012'),
+('AT035', 'F', 'Elena', 'Peña', '2007-2-9', 'Eje 6 Sur', 480, 'Iztapalapa', 'EQU012'),
+('AT036', 'F', 'Isabel', 'Campos', '2002-4-3', 'Eje 3 Norte', 70, 'Azcapotzalco', 'EQU012'),
+('AT037', 'F', 'Laura', 'Suárez', '2004-6-9', 'Eje 8 Sur', 412, 'Benito Juárez', 'EQU013'),
+('AT038', 'F', 'Patricia', 'Gutiérrez', '2003-8-26', 'Eje 10 Sur', 421, 'Coyoacán', 'EQU013'),
+('AT039', 'F', 'Marta', 'Velázquez', '2002-9-17', 'Eje 1 Norte', 111, 'V. Carranza', 'EQU013'),
+('AT040', 'F', 'Rosa', 'Navarro', '2002-10-5', 'Eje 2 Norte', 235, 'V. Carranza', 'EQU014'),
+('AT041', 'F', 'Gabriela', 'Molina', '2002-2-13', 'Eje 3 Oriente', 147, 'Iztapalapa', 'EQU014'),
+('AT042', 'F', 'Claudia', 'Soto', '2001-8-17', 'Eje 4 Sur', 131, 'Benito Juárez', 'EQU014'),
+('AT043', 'F', 'Silvia', 'Luna', '2002-8-22', 'Eje 5 Norte', 142, 'Azcapotzalco', 'EQU015'),
+('AT044', 'F', 'Andrea', 'Ibarra', '2000-11-22', 'Eje 6 Norte', 154, 'Gustavo Madero', 'EQU015'),
+('AT045', 'F', 'Paula', 'Pacheco', '2001-12-13', 'Eje 1 Poniente', 450, 'Iztapalapa', 'EQU015'),
+('AT046', 'F', 'Carolina', 'Valdez', '2003-10-16', 'Eje 2 Poniente', 438, 'Miguel Hidalgo', 'EQU016'),
+('AT047', 'F', 'Teresa', 'Carrillo', '2007-12-14', 'Eje 3 Poniente', 298, 'V. Carranza', 'EQU016'),
+('AT048', 'F', 'Ángela', 'Rosales', '2003-12-10', 'Eje 4 Norte', 308, 'V. Carranza', 'EQU016'),
+('AT049', 'F', 'Natalia', 'Cordero', '1999-4-8', 'Eje 1 Oriente', 159, 'V. Carranza', 'EQU017'),
+('AT050', 'F', 'Susana', 'Acosta', '2004-1-25', 'Eje 2 Oriente', 308, 'V. Carranza', 'EQU017'),
+('AT051', 'F', 'Verónica', 'Cuevas', '2006-11-9', 'Legaria', 112, 'Gustavo Madero', 'EQU017'),
+('AT052', 'F', 'Sandra', 'Santana', '1999-10-20', 'Oceanía', 76, 'Cuauhtémoc', 'EQU018'),
+('AT053', 'F', 'Alejandra', 'Salazar', '1999-4-7', 'Eduardo Molina', 20, 'Gustavo Madero', 'EQU018'),
+('AT054', 'F', 'Beatriz', 'Escobar', '2005-5-24', 'Canal del Norte', 98, 'Gustavo Madero', 'EQU018'),
+('AT055', 'F', 'Julia', 'Solís', '2000-12-14', 'Congreso de la Unión', 96, 'Gustavo Madero', 'EQU019'),
+('AT056', 'F', 'Lorena', 'Miranda', '2004-12-10', 'Misterios', 327, 'Azcapotzalco', 'EQU019'),
+('AT057', 'F', 'Adriana', 'Maldonado', '2001-3-14', 'Ricardo Flores Magón', 371, 'Gustavo Madero', 'EQU019'),
+('AT058', 'F', 'Mariana', 'Sandoval', '2003-9-18', 'de Guadalupe', 50, 'Álvaro Obregón', 'EQU020'),
+('AT059', 'F', 'Valeria', 'Treviño', '1999-1-26', 'De los Misterios', 376, 'Álvaro Obregón', 'EQU020'),
+('AT060', 'F', 'Daniela', 'Palacios', '2001-12-4', 'Talismán', 385, 'Cuajimalpa', 'EQU020'),
+('AT061', 'F', 'Sofía', 'Esquivel', '2007-1-18', 'Norte 45', 203, 'Cuauhtémoc', 'EQU021'),
+('AT062', 'F', 'Camila', 'Cervantes', '2006-5-24', 'Ferrocarril Hidalgo', 268, 'Cuauhtémoc', 'EQU021'),
+('AT063', 'F', 'Victoria', 'Arroyo', '2000-7-28', 'Centenario', 459, 'Cuauhtémoc', 'EQU021'),
+('AT064', 'F', 'Renata', 'Contreras', '2001-7-1', 'Las Águilas', 462, 'Cuauhtémoc', 'EQU022'),
+('AT065', 'F', 'Bianca', 'Montes', '2007-9-14', 'Vasco de Quiroga', 163, 'Cuauhtémoc', 'EQU022'),
+('AT066', 'F', 'Araceli', 'Camacho', '2003-3-1', 'San Antonio Abad', 307, 'Cuauhtémoc', 'EQU022'),
+('AT067', 'F', 'Fernanda', 'Herrera', '2006-1-10', 'Arcos de Belén', 284, 'Cuauhtémoc', 'EQU023'),
+('AT068', 'F', 'Jimena', 'Orozco', '1999-9-22', 'Fray Servando', 442, 'Cuauhtémoc', 'EQU023'),
+('AT069', 'F', 'Rebeca', 'Mejía', '2002-8-1', 'Circunvalación', 89, 'Cuauhtémoc', 'EQU023'),
+('AT070', 'F', 'Liliana', 'Gallegos', '2007-8-17', 'del Taller', 376, 'Cuauhtémoc', 'EQU024'),
+('AT071', 'M', 'Esteban', 'Padilla', '2001-9-27', 'Balderas', 374, 'Benito Juárez', 'EQU024'),
+('AT072', 'M', 'Mauricio', 'Zamora', '2000-9-26', 'Bucareli', 268, 'Coyoacán', 'EQU024'),
+('AT073', 'M', 'Guillermo', 'Arellano', '2004-9-4', 'Morelos', 329, 'Benito Juárez', 'EQU025'),
+('AT074', 'M', 'Ramón', 'Rangel', '2001-2-17', 'Doctor Río de la Loza', 136, 'Cuauhtémoc', 'EQU025'),
+('AT075', 'M', 'Felipe', 'Figueroa', '2004-8-3', 'Niño Perdido', 101, 'Iztacalco', 'EQU025'),
+('AT076', 'M', 'Emilio', 'Valencia', '2000-12-14', 'Tlalpan Centro', 203, 'V. Carranza', 'EQU026'),
+('AT077', 'M', 'Gerardo', 'Del Valle', '2004-2-14', 'Miramontes', 244, 'Gustavo Madero', 'EQU026'),
+('AT078', 'M', 'Benjamín', 'Olivares', '2007-10-4', 'Villa de Cortés', 438, 'Gustavo Madero', 'EQU026'),
+('AT079', 'M', 'Tomás', 'Bustamante', '2004-10-19', 'Chabacano', 419, 'Gustavo Madero', 'EQU027'),
+('AT080', 'M', 'Emanuel', 'Calderón', '2006-2-10', 'Troncoso', 287, 'Gustavo Madero', 'EQU027'),
+('AT081', 'M', 'Rafael', 'León', '2001-3-10', 'Gran Canal', 239, 'Iztapalapa', 'EQU027'),
+('AT082', 'M', 'Salvador', 'Nieto', '1999-9-25', 'Loreto Fabela', 91, 'Coyoacán', 'EQU028'),
+('AT083', 'M', 'Álvaro', 'Fuentes', '2001-1-17', 'San Juan de Aragón', 476, 'Coyoacán', 'EQU028'),
+('AT084', 'M', 'Octavio', 'Cano', '2001-7-9', '608', 256, 'Iztapalapa', 'EQU028'),
+('AT085', 'M', 'Nicolás', 'Bravo', '2007-2-9', '412', 419, 'Iztacalco', 'EQU029'),
+('AT086', 'M', 'Leandro', 'Corona', '2003-5-9', 'Canal de Apatlaco', 120, 'Iztapalapa', 'EQU029'),
+('AT087', 'M', 'Héctor', 'Saucedo', '2005-12-15', 'La Virgen', 235, 'Iztapalapa', 'EQU029'),
+('AT088', 'M', 'Agustín', 'Villanueva', '2007-1-5', 'Cafetales', 225, 'Iztapalapa', 'EQU030'),
+('AT089', 'M', 'Joaquín', 'Benítez', '2006-4-6', 'Canal de Tezontle', 218, 'Iztacalco', 'EQU030'),
+('AT090', 'M', 'Arturo', 'Pineda', '2004-7-26', 'Plutarco Elías Calles', 116, 'Miguel Hidalgo', 'EQU030');
+
+-- 6. Especialidades
+INSERT INTO especialidades VALUES
+('ESP001', '100 metros', 'DEP001'),
+('ESP002', '400 metros', 'DEP001'),
+('ESP003', '1500 metros', 'DEP001'),
+('ESP004', 'De altura', 'DEP002'),
+('ESP005', 'Con pértiga', 'DEP002'),
+('ESP006', 'De longitud', 'DEP002'),
+('ESP007', 'Bala', 'DEP003'),
+('ESP008', 'Disco', 'DEP003'),
+('ESP009', 'Jabalina', 'DEP003'),
+('ESP010', 'Decatlón', 'DEP004'),
+('ESP011', 'Heptatlón', 'DEP004'),
+('ESP012', 'Pentatlón', 'DEP004'),
+('ESP013', 'Maratón', 'DEP005'),
+('ESP014', 'Media maratón', 'DEP005'),
+('ESP015', '20 km marcha', 'DEP005');
+
+-- 7. Recintos
+INSERT INTO recintos VALUES
+('REC001', 'E. Olímpico Universitario', 'Insurgentes Sur', NULL, 'Coyoacán'),
+('REC002', 'Pista El Sope', 'Bosque de Chapultepec', NULL, 'Miguel Hidalgo'),
+('REC003', 'CNAR', 'Avenida del Conscripto', 17, 'Miguel Hidalgo'),
+('REC004', 'Estadio Wilfrido Massieu', 'Avenida Wilfrido Massieu', 589, 'Gustavo Madero'),
+('REC005', 'Estadio de Prácticas', 'Insurgentes Sur', NULL, 'Coyoacán'),
+('REC006', 'Deportivo Magdalena Mixhuca', 'Viaducto', NULL, 'Iztacalco'),
+('REC007', 'Estadio de los Borregos', 'Insurgentes Sur', 3000, 'Tlalpan'),
+('REC008', 'Autódromo Hermanos Rodríguez', 'Viaducto', NULL, 'Iztacalco'),
+('REC009', 'Bosque de Chapultepec', 'Paseo de la Reforma', NULL, 'Miguel Hidalgo'),
+('REC010', 'Pista de Atletismo', 'Constituyentes', NULL, 'Miguel Hidalgo');
+
+-- 8. Eventos
+INSERT INTO eventos VALUES
+('EVE001', '2023-12-2', '2023-12-9', '100 planos verano', 'DIV001', 'REC010', 'ESP001'),
+('EVE002', '2024-10-22', '2024-10-29', '100 planos con vallas', 'DIV001', 'REC010', 'ESP001'),
+('EVE003', '2023-12-14', '2023-12-21', '100 planos interuniversitario', 'DIV001', 'REC010', 'ESP001'),
+('EVE004', '2023-4-12', '2023-4-19', '400 planos verano', 'DIV001', 'REC010', 'ESP002'),
+('EVE005', '2023-12-1', '2023-12-8', '400 planos con vallas', 'DIV002', 'REC009', 'ESP002'),
+('EVE006', '2023-2-3', '2023-2-10', '400 planos interuniversitario', 'DIV002', 'REC009', 'ESP002'),
+('EVE007', '2024-8-6', '2024-8-13', '1500 planos verano', 'DIV002', 'REC009', 'ESP003'),
+('EVE008', '2023-11-14', '2023-11-21', '1500 planos con vallas', 'DIV002', 'REC009', 'ESP003'),
+('EVE009', '2023-8-3', '2023-8-10', '1500 planos interuniversitario', 'DIV002', 'REC008', 'ESP003'),
+('EVE010', '2024-5-18', '2024-5-25', 'Alcanza el cielo', 'DIV003', 'REC008', 'ESP004'),
+('EVE011', '2024-5-13', '2024-5-20', 'Torneo de altura', 'DIV003', 'REC008', 'ESP004'),
+('EVE012', '2023-5-1', '2023-5-8', 'Campeonato de salto', 'DIV003', 'REC008', 'ESP004'),
+('EVE013', '2024-2-21', '2024-2-28', 'Campeonato pértiga', 'DIV003', 'REC007', 'ESP005'),
+('EVE014', '2023-4-4', '2023-4-11', 'Pruebas pértiga', 'DIV004', 'REC007', 'ESP005'),
+('EVE015', '2023-2-14', '2023-2-21', 'Torneo de pértiga', 'DIV004', 'REC007', 'ESP005'),
+('EVE016', '2024-5-12', '2024-5-19', 'Copa Marca', 'DIV004', 'REC007', 'ESP006'),
+('EVE017', '2023-6-3', '2023-6-10', 'Torneo de longitud', 'DIV004', 'REC006', 'ESP006'),
+('EVE018', '2023-6-5', '2023-6-12', 'Longitud interuniversitaria', 'DIV004', 'REC006', 'ESP006'),
+('EVE019', '2023-12-17', '2023-12-24', 'Copa Bala', 'DIV005', 'REC006', 'ESP007'),
+('EVE020', '2024-4-5', '2024-4-12', 'Torneo Bala', 'DIV005', 'REC006', 'ESP007'),
+('EVE021', '2023-1-13', '2023-1-20', 'Campeonato Bala', 'DIV005', 'REC005', 'ESP007'),
+('EVE022', '2024-8-8', '2024-8-15', 'Pruebas de disco', 'DIV005', 'REC005', 'ESP008'),
+('EVE023', '2023-2-21', '2023-2-28', 'Interuniversitario de disco', 'DIV006', 'REC005', 'ESP008'),
+('EVE024', '2024-5-2', '2024-5-9', 'Campeonato disco', 'DIV006', 'REC005', 'ESP008'),
+('EVE025', '2024-6-3', '2024-6-10', 'Competencia jabalina', 'DIV006', 'REC004', 'ESP009'),
+('EVE026', '2023-4-18', '2023-4-25', 'Copa jabalina', 'DIV006', 'REC004', 'ESP009'),
+('EVE027', '2024-12-15', '2024-12-22', 'Pruebas jabalina', 'DIV006', 'REC004', 'ESP009'),
+('EVE028', '2023-12-8', '2023-12-15', 'Decatlón UNAM', 'DIV007', 'REC004', 'ESP010'),
+('EVE029', '2023-9-5', '2023-9-12', 'Decatlón IPN', 'DIV007', 'REC003', 'ESP010'),
+('EVE030', '2023-3-8', '2023-3-15', 'Decatlón UAM', 'DIV007', 'REC003', 'ESP010'),
+('EVE031', '2024-4-8', '2024-4-15', 'Heptatlón UNAM', 'DIV007', 'REC003', 'ESP011'),
+('EVE032', '2023-5-8', '2023-5-15', 'Heptatlón IPN', 'DIV008', 'REC003', 'ESP011'),
+('EVE033', '2024-10-13', '2024-10-20', 'Heptatlón UAM', 'DIV008', 'REC002', 'ESP011'),
+('EVE034', '2023-11-17', '2023-11-24', 'Pentatlón UNAM', 'DIV008', 'REC002', 'ESP012'),
+('EVE035', '2024-4-17', '2024-4-24', 'Pentatlón IPN', 'DIV008', 'REC002', 'ESP012'),
+('EVE036', '2023-1-15', '2023-1-22', 'Pentatlón UAM', 'DIV008', 'REC002', 'ESP012'),
+('EVE037', '2023-2-14', '2023-2-21', 'Maratón UNAM', 'DIV009', 'REC001', 'ESP013'),
+('EVE038', '2024-5-19', '2024-5-26', 'Maratón IPN', 'DIV009', 'REC001', 'ESP013'),
+('EVE039', '2023-2-5', '2023-2-12', 'Maratón UAM', 'DIV009', 'REC001', 'ESP013'),
+('EVE040', '2024-7-17', '2024-7-24', 'Media maratón UNAM', 'DIV009', 'REC001', 'ESP014'),
+('EVE041', '2024-11-6', '2024-11-13', 'Media maratón IPN', 'DIV010', 'REC001', 'ESP014'),
+('EVE042', '2025-2-3', '2025-2-10', 'Media maratón UAM', 'DIV010', 'REC003', 'ESP014'),
+('EVE043', '2023-5-17', '2023-5-24', '20 km UNAM', 'DIV010', 'REC007', 'ESP015'),
+('EVE044', '2024-12-12', '2024-12-19', '20 km IPN', 'DIV010', 'REC009', 'ESP015'),
+('EVE045', '2023-8-22', '2023-8-29', '20 km UAM', 'DIV010', 'REC010', 'ESP015');
+
+-- 9. Competencias
+INSERT INTO compite_en VALUES
+('ATL001', 'EVE041', NULL, 0),
+('ATL002', 'EVE042', 2, 250),
+('ATL003', 'EVE043', NULL, 0),
+('ATL004', 'EVE044', NULL, 0),
+('ATL005', 'EVE045', NULL, 0),
+('ATL006', 'EVE041', 3, 100),
+('ATL007', 'EVE042', NULL, 0),
+('ATL008', 'EVE043', 3, 100),
+('ATL009', 'EVE044', 2, 250),
+('ATL010', 'EVE037', 2, 250),
+('ATL011', 'EVE038', 2, 250),
+('ATL012', 'EVE039', 1, 500),
+('ATL013', 'EVE040', 3, 100),
+('ATL014', 'EVE037', NULL, 0),
+('ATL015', 'EVE038', NULL, 0),
+('ATL016', 'EVE039', NULL, 0),
+('ATL017', 'EVE040', NULL, 0),
+('ATL018', 'EVE037', 3, 100),
+('ATL019', 'EVE032', 2, 250),
+('ATL020', 'EVE033', 1, 500),
+('ATL021', 'EVE034', 1, 500),
+('ATL022', 'EVE035', 3, 100),
+('ATL023', 'EVE036', 3, 100),
+('ATL024', 'EVE032', 1, 500),
+('ATL025', 'EVE033', 1, 500),
+('ATL026', 'EVE030', NULL, 0),
+('ATL027', 'EVE032', 1, 500),
+('ATL028', 'EVE028', NULL, 0),
+('ATL029', 'EVE029', NULL, 0),
+('ATL030', 'EVE030', 3, 100),
+('ATL031', 'EVE031', NULL, 0),
+('ATL032', 'EVE028', 2, 250),
+('ATL033', 'EVE029', 3, 100),
+('ATL034', 'EVE030', 1, 500),
+('ATL035', 'EVE031', 2, 250),
+('ATL036', 'EVE028', 2, 250),
+('ATL037', 'EVE023', NULL, 0),
+('ATL038', 'EVE024', NULL, 0),
+('ATL039', 'EVE025', 2, 250),
+('ATL040', 'EVE026', 3, 100),
+('ATL041', 'EVE027', 2, 250),
+('ATL042', 'EVE023', NULL, 0),
+('ATL043', 'EVE024', 3, 100),
+('ATL044', 'EVE025', NULL, 0),
+('ATL045', 'EVE026', 1, 500),
+('ATL046', 'EVE019', 3, 100),
+('ATL047', 'EVE020', 1, 500),
+('ATL048', 'EVE021', 1, 500),
+('ATL049', 'EVE022', 3, 100),
+('ATL050', 'EVE019', 2, 250),
+('ATL051', 'EVE020', 2, 250),
+('ATL052', 'EVE021', 3, 100),
+('ATL053', 'EVE022', 1, 500),
+('ATL054', 'EVE019', NULL, 0),
+('ATL055', 'EVE014', 1, 500),
+('ATL056', 'EVE015', NULL, 0),
+('ATL057', 'EVE016', 3, 100),
+('ATL058', 'EVE017', 2, 250),
+('ATL059', 'EVE018', 1, 500),
+('ATL060', 'EVE014', NULL, 0),
+('ATL061', 'EVE015', NULL, 0),
+('ATL062', 'EVE016', 1, 500),
+('ATL063', 'EVE017', 2, 250),
+('ATL064', 'EVE010', 1, 500),
+('ATL065', 'EVE011', 1, 500),
+('ATL066', 'EVE012', 2, 250),
+('ATL067', 'EVE013', NULL, 0),
+('ATL068', 'EVE010', NULL, 0),
+('ATL069', 'EVE011', 3, 100),
+('ATL070', 'EVE012', 2, 250),
+('ATL071', 'EVE013', 2, 250),
+('ATL072', 'EVE010', NULL, 0),
+('ATL073', 'EVE005', NULL, 0),
+('ATL074', 'EVE006', NULL, 0),
+('ATL075', 'EVE007', 2, 250),
+('ATL076', 'EVE008', 3, 100),
+('ATL077', 'EVE009', 2, 250),
+('ATL078', 'EVE005', 3, 100),
+('ATL079', 'EVE006', 2, 250),
+('ATL080', 'EVE007', 2, 250),
+('ATL081', 'EVE008', 2, 250),
+('ATL082', 'EVE001', 2, 250),
+('ATL083', 'EVE002', 1, 500),
+('ATL084', 'EVE003', 3, 100),
+('ATL085', 'EVE004', 1, 500),
+('ATL086', 'EVE001', 1, 500),
+('ATL087', 'EVE002', 2, 250),
+('ATL088', 'EVE003', 2, 250),
+('ATL089', 'EVE004', 2, 250),
+('ATL090', 'EVE001', NULL, 0);
+
+SELECT * FROM compite_en;
+
+SELECT * FROM eventos;
+
+SELECT * FROM recintos;
+
+SELECT * FROM especialidades;
+
+SELECT * FROM atletas;
+
+SELECT * FROM equipos;
+
+SELECT * FROM entrenadores;
+
+SELECT * FROM divisiones;
+
+SELECT * FROM deportes;
+
+-- Creamos indices en campos líderes para agilizar las busquedas
+
+CREATE INDEX idx_equipos_nombre ON equipos(nombreEq);
+
+CREATE INDEX idx_atletas_nombre_comp ON atletas(nombreAt, apellidoAt);
+
+CREATE INDEX idx_eventos_nombre ON eventos(nombreEv);
+
+CREATE INDEX idx_compite_en_puntos ON compite_en(puntos_obt);
+
+CREATE INDEX idx_atletas_equipo_id ON atletas(id_equipo);
+
+CREATE INDEX idx_compite_en_evento_id ON compite_en(id_evento);
+
+CREATE INDEX idx_compite_en_atleta_id ON compite_en(matricula);
+
+\d compite_en
+
+-- Procedimiento sp_inserta
+
+CREATE OR REPLACE PROCEDURE sp_inserta_division (
+    IN cod_division_param CHAR(6),
+    IN nombre_division_param VARCHAR(15)
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    INSERT INTO divisiones (codigo_division, nombreDiv)
+    VALUES (cod_division_param, nombre_division_param);
+END;
+$$;
+
+-- Prueba
+
+CALL sp_inserta_deporte('DIV011', 'Amateur');
+
+SELECT * FROM divisiones ORDER BY codigo_division DESC; 
+
+-- Consultas hoja de requerimientos
+
+SELECT 
+    nombreAt,
+    apellidoAt,
+    (
+        SELECT SUM(c.puntos_obt)
+        FROM compite_en c
+        WHERE c.matricula = atletas.matricula
+    ) AS total_puntos
+FROM atletas 
+WHERE id_equipo = (
+    SELECT id_equipo
+    FROM equipos 
+    WHERE nombreEq = 'Halcones'
+);
+
+SELECT 
+	(
+		SELECT nombreEv 
+		FROM eventos 
+		WHERE id_evento IN 
+        (
+			SELECT id_evento 
+            FROM compite_en
+            WHERE matricula = c.matricula
+		) ORDER BY fecha_fin 
+		LIMIT 1
+    ) AS nombreEv,  
+    (
+		SELECT nombreEs 
+        FROM especialidades 
+        WHERE id_especialidad 
+        IN 
+		(
+			SELECT id_especialidad 
+            FROM eventos 
+            WHERE id_evento IN 
+            ( 
+				SELECT id_evento
+                FROM compite_en 
+                WHERE matricula = c.matricula
+			)
+		)
+	) AS especialidad, 
+    (
+		SELECT sum(puntos_obt) 
+        FROM compite_en
+        WHERE matricula = c.matricula
+	) as puntos_tot 
+    FROM compite_en c 
+    WHERE matricula IN 
+    (
+		SELECT matricula 
+        FROM atletas 
+        WHERE nombreAt = 'Juan' 
+        AND apellidoAt = 'Pérez');
+
+SELECT
+    E.nombreEq,
+    SUM(CE.puntos_obt) AS puntos_totales_del_equipo
+FROM
+    Equipos AS E
+JOIN
+    Atletas AS A ON E.id_equipo = A.id_equipo
+JOIN
+    compite_en AS CE ON A.matricula = CE.matricula
+JOIN
+    Eventos AS EV ON CE.id_evento = EV.id_evento
+WHERE
+    EV.nombreEv = 'Maratón UNAM'
+GROUP BY
+    E.nombreEq;
+
+-- Procedimiento sp_consultas
+
+CREATE OR REPLACE FUNCTION sp_consultas(
+	param_nom_eq CHAR(15),
+	param_nom_at CHAR(15),
+	param_ap_at CHAR(15),
+	param_nom_ev CHAR(30),
+	param_nom_dep CHAR(20)
+)
+RETURNS TABLE (
+	nombre1 VARCHAR(30),
+	nombre2 VARCHAR(30),
+	puntos BIOGINT
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+	RETURN QUERY
+
+	SELECT nombreAt,apellidoAt,
+(
+    	SELECT SUM(c.puntos_obt)
+        	FROM compite_en c
+        	WHERE c.matricula = atletas.matricula
+) AS total_puntos
+FROM atletas 
+WHERE id_equipo = (
+  	  SELECT id_equipo
+   	 FROM equipos 
+    	WHERE nombreEq = 'Halcones'
+);
+
+	RETURN QUERY
+
+	SELECT 
+(
+	SELECT nombreEv 
+	FROM eventos 
+	WHERE id_evento IN 
+        	(
+SELECT id_evento 
+         	FROM compite_en
+         	WHERE matricula = c.matricula
+	) ORDER BY fecha_fin 
+LIMIT 1
+) AS nombreEv,  
+(
+	SELECT nombreEs 
+        	FROM especialidades 
+        	WHERE id_especialidad 
+        	IN 
+	(
+	SELECT id_especialidad 
+         	FROM eventos 
+         	WHERE id_evento IN 
+          ( 
+		SELECT id_evento
+                	FROM compite_en 
+                	WHERE matricula = c.matricula
+	)
+	)
+) AS especialidad, 
+(
+SELECT sum(puntos_obt) 
+        	FROM compite_en
+        	WHERE matricula = c.matricula
+	) AS puntos_tot 
+    	FROM compite_en c 
+    	WHERE matricula IN 
+    	(
+		SELECT matricula 
+        		FROM atletas 
+        		WHERE nombreAt = 'Juan' 
+        		AND apellidoAt = 'Pérez');
+
+	RETURN QUERY
+
+	SELECT
+    EV.nombreEv, 
+    E.nombreEq,
+    SUM(CE.puntos_obt) AS puntos_totales_del_equipo
+FROM
+    Equipos E
+JOIN
+    Atletas A ON E.id_equipo = A.id_equipo
+JOIN
+    compite_en CE ON A.matricula = CE.matricula
+JOIN
+    Eventos EV ON CE.id_evento = EV.id_evento
+WHERE
+    EV.nombreEv = 'Maratón UNAM'
+GROUP BY
+    E.nombreEq;
+
+	RETURN QUERY
+
+-- Devuelve el nombre y apellido y edad de los atletas que participan en el deporte referido.
+
+	SELECT nombreAt, apellidoAt, EXTRACT(YEAR FROM AGE(CURRENT_DATE, fechnac)) AS edad FROM atletas WHERE id_equipo IN (SELECT id_equipo FROM equipos WHERE id_deporte IN (SELECT id_deporte FROM deportes WHERE nombreDep = 'Salto'));
+
+	RETURN QUERY
+
+-- Devuelve el nombre del equipo, nombre del jugador, y puntos obtenidos del jugador con mayor suma de puntos.
+
+	SELECT
+    e.nombreEq,
+    a.nombreAt,
+    SUM(c.puntos_obt) AS puntos_totales
+FROM
+    equipos e
+JOIN
+    atletas a ON e.id_equipo = a.id_equipo
+JOIN
+    compite_en c ON a.matricula = c.matricula
+GROUP BY
+    e.nombreEq, a.nombreAt;
+
+END;
+$$;
+
+-- Procedimiento sp_borra
+
+CREATE OR REPLACE FUNCTION sp_borra_entrenador(
+    p_id_entrenador CHAR(6)
+)
+RETURNS TEXT
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_count_equipos INTEGER;
+    v_mensaje TEXT;
+BEGIN
+    -- Verificar si el entrenador existe
+    IF NOT EXISTS (SELECT 1 FROM entrenadores WHERE id_entrenador = p_id_entrenador) THEN
+        RETURN 'ERROR: El entrenador con ID ' || p_id_entrenador || ' no existe.';
+    END IF;
+    
+    -- Verificar dependencias en tabla equipos
+    SELECT COUNT(*) INTO v_count_equipos 
+    FROM equipos 
+    WHERE id_entrenador = p_id_entrenador;
+    
+    -- Si hay dependencias, no permitir eliminación
+    IF v_count_equipos > 0 THEN
+        RETURN 'ERROR: No se puede eliminar el entrenador. Tiene ' || v_count_equipos || ' equipos asignados.';
+    END IF;
+    
+    -- Si no hay dependencias, proceder con la eliminación
+    DELETE FROM entrenadores WHERE id_entrenador = p_id_entrenador;
+    
+    RETURN 'ÉXITO: Entrenador eliminado correctamente.';
+    
+EXCEPTION
+    WHEN OTHERS THEN
+        RETURN 'ERROR: ' || SQLERRM;
+END;
+$$;
+
+-- Creamos un valor sin dependencias para probar
+
+INSERT INTO entrenadores VALUES
+('ENT011', 'Fulano', 'Tal');
+
+SELECT * FROM entrenadores ORDER BY id_entrenador DESC LIMIT 2;
+
+SELECT sp_borra_entrenador('ENT011');
+
+SELECT * FROM entrenadores ORDER BY id_entrenador DESC LIMIT 2;
+
+-- Probamos con un valor dependiente
+
+SELECT sp_borra_entrenador('ENT001');
+
+-- Evaluación de triggers de restricción: 
+
+INSERT INTO atletas VALUES
+('AT092', 'M', 'Fulano', 'Tal', '2000-01-01', 'Av Ermita', 443, 'Coyoacán', 'EQU030');
+
+INSERT INTO compite_en VALUES
+('AT092', 'EVE045', NULL, 0);
+
+-- DROP DATABASE atletas;
